@@ -1,0 +1,22 @@
+services:
+  habitat:
+    build:
+        context: .
+        dockerfile: ./Dockerfile
+    image: habitat:latest
+    runtime: nvidia
+    privileged: true
+    network_mode: host
+    container_name: habitat
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute,display
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${HOME}/.Xauthority:/home/habitat/.Xauthority:ro
+      - .:/home/habitat/habitat-sim
+      - /dev/dri:/dev/dri
+      - /mnt/data/mikura:/data
+    command: sleep infinity
