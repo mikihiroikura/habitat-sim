@@ -7,13 +7,7 @@ ENV TZ=Europe/Rome
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Setup basic packages
-RUN sed -i 's@archive.ubuntu.com@ftp.jaist.ac.jp@g' /etc/apt/sources.list && \
-    sed -i 's@security.ubuntu.com@ftp.jaist.ac.jp@g' /etc/apt/sources.list && \
-    rm -f /etc/apt/sources.list.d/cuda.list /etc/apt/sources.list.d/nvidia-ml.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
-    && add-apt-repository universe \
-    && apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
     curl \
@@ -29,7 +23,9 @@ RUN sed -i 's@archive.ubuntu.com@ftp.jaist.ac.jp@g' /etc/apt/sources.list && \
     pkg-config \
     wget \
     zip \
-    unzip \
+    unzip
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libgl1-mesa-dri \
     libglu1-mesa \
