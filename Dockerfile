@@ -1,11 +1,21 @@
 # Base image
 FROM nvidia/cudagl:11.3.0-devel-ubuntu20.04
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set timezone
+ENV TZ=Europe/Rome
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Setup basic packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's@archive.ubuntu.com@ftp.jaist.ac.jp@g' /etc/apt/sources.list && \
+    sed -i 's@security.ubuntu.com@ftp.jaist.ac.jp@g' /etc/apt/sources.list && \
+    rm -f /etc/apt/sources.list.d/cuda.list /etc/apt/sources.list.d/nvidia-ml.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository universe \
+    && apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
-    git-lfs \
     curl \
     vim \
     ca-certificates \
@@ -29,7 +39,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxinerama1 \
     libxcursor1 \
     xauth \
-    mesa-utils && \
+    mesa-utils \
+    libglvnd-dev \
+    xdg-utils && \
     rm -rf /var/lib/apt/lists/*
 
 # Install git-lfs
@@ -79,11 +91,12 @@ RUN cd $CODE_DIR && /bin/bash -c ". activate habitat; conda install habitat-sim 
 RUN cd $CODE_DIR && git clone --branch stable https://github.com/facebookresearch/habitat-lab.git
 RUN cd $CODE_DIR && /bin/bash -c ". activate habitat; pip install -e habitat-lab/"
 
-# Install OpenCV
-RUN /bin/bash -c ". activate habitat; conda install -c conda-forge opencv"
-
 ### Change owner
 RUN chown -R $UNAME:$UNAME ${CODE_DIR} ${CONDA_DIR}
+
+# Install requirements.txt
+COPY . $CODE_DIR/habitat-sim
+RUN cd $CODE_DIR/habitat-sim && /bin/bash -c ". activate habitat; conda install -n habitat -c conda-forge --file requirements.txt"
 
 # Silence habitat-sim logs
 ENV GLOG_minloglevel=2
