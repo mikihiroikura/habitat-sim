@@ -119,7 +119,7 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
         # Save image to output folder
         plt.imsave(output_folder_path / "rgb" / f"{num_frames:06d}.png", rgb_image)
         plt.imsave(output_folder_path / "semantic" / f"{num_frames:06d}.png", semantic_image)
-        
+
         # Save timestamp if required
         if timestamp_file is not None:
             with open(timestamp_file, "a") as f:

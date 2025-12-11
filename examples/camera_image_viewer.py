@@ -4,12 +4,14 @@ import cv2
 import habitat_sim
 import argparse
 import pathlib
-from typing import Optional
+from typing import Optional, List
 from habitat_sim.utils.common import quat_rotate_vector
 import quaternion  # noqa: F401
+import json
 
 
 init_pos = None
+waypoints: List[dict] = []
 
 
 def controlCameraPosition(sim: habitat_sim.Simulator, key: int) -> None:
@@ -61,7 +63,15 @@ def controlCameraPosition(sim: habitat_sim.Simulator, key: int) -> None:
         # Rotate down (pitch)
         rot = quaternion.from_rotation_vector(np.array([np.deg2rad(-rotate_deg), 0, 0]))
         new_state.rotation = new_state.rotation * rot
-
+    elif key == 13:  # Enter key
+        # Record current position and rotation as waypoint
+        global waypoints
+        waypoint = {
+            "position": new_state.position.tolist(),
+            "rotation": [new_state.rotation.w, new_state.rotation.x, new_state.rotation.y, new_state.rotation.z]
+        }
+        waypoints.append(waypoint)
+        print(f"Recorded waypoint: {waypoint}")
     elif key == ord(' '):
         # Reset position
         global init_pos
@@ -77,10 +87,11 @@ def camera_image_viewer(args: argparse.Namespace) -> None:
     # Parameter setup
     scene_path: pathlib.Path = args.scene_path
     navmesh_path: pathlib.Path = args.navmesh_path
-    output_folder_path: Optional[pathlib.Path] = None
-    if args.output_folder_path is not None:
-        output_folder_path = pathlib.Path(args.output_folder_path)
-        output_folder_path.mkdir(parents=True, exist_ok=True)
+    record_waypoints_path: Optional[pathlib.Path] = None
+    if args.record_waypoints_path is not None:
+        record_waypoints_path = pathlib.Path(args.record_waypoints_path)
+        record_waypoints_path.parent.mkdir(parents=True, exist_ok=True)
+        open(record_waypoints_path, "w").close()  # Create or clear the waypoints file
 
     # Simulator configuration
     sim_cfg = habitat_sim.SimulatorConfiguration()
@@ -118,12 +129,6 @@ def camera_image_viewer(args: argparse.Namespace) -> None:
         cv2.imshow("RGB Camera View", rgb_image)
         k = cv2.waitKey(30)
 
-        # # Save the RGB image if output folder is specified
-        # if output_folder_path is not None:
-        #     img_filename = output_folder_path / f"rgb_image_{len(list(output_folder_path.glob('rgb_image_*.png')))}.png"
-        #     cv2.imwrite(img_filename.__str__(), cv2.cvtColor(rgb_image, cv2.COLOR_RGBA2BGR))
-        #     print(f"Saved image to: {img_filename}")
-
         # Break the loop on 'ESC' key press
         if k == 27: #ESC key
             break
@@ -132,6 +137,12 @@ def camera_image_viewer(args: argparse.Namespace) -> None:
             
             
     sim.close()
+    
+    # Save recorded waypoints to JSON file
+    if record_waypoints_path is not None:
+        with open(record_waypoints_path, 'w') as f:
+            json.dump(waypoints, f, indent=4)
+        print(f"Saved waypoints to: {record_waypoints_path}")
     return None
 
 
@@ -139,7 +150,10 @@ def camera_image_viewer(args: argparse.Namespace) -> None:
 if __name__== "__main__":
     parser = argparse.ArgumentParser(
         description="""Visualize RGB image from camera sensor in a Habitat-Sim simulator.
-                                     || Example usage: python examples/camera_image_viewer.py"""
+                                     || Example usage: python examples/camera_image_viewer.py
+                                     -s /data/Replica/room_0/habitat/mesh_semantic.ply 
+                                     --navmesh_path /data/Replica/room_0/habitat/mesh_semantic.navmesh 
+                                     """
     )
     parser.add_argument(
         "-s",
@@ -155,13 +169,6 @@ if __name__== "__main__":
         required=True,
     )
     parser.add_argument(
-        "-o",
-        "--output_folder_path",
-        help="Output folder path for .npz files",
-        type=str,
-        default=None,
-    )
-    parser.add_argument(
         "--cam_width",
         help="Camera width",
         type=int,
@@ -172,6 +179,12 @@ if __name__== "__main__":
         help="Camera height",
         type=int,
         default=480,
+    )
+    parser.add_argument(
+        "--record_waypoints_path",
+        help="Path to the waypoints JSON file",
+        type=str,
+        default=None,
     )
     args = parser.parse_args()
 
