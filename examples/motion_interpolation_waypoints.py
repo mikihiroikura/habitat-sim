@@ -33,11 +33,16 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
     cam_width = args.cam_width
     cam_height = args.cam_height
     timestamp_file: Optional[pathlib.Path] = None
+    angular_velocity_file: Optional[pathlib.Path] = None
     if args.timestamp_file is not None:
         timestamp_file = pathlib.Path(args.output_folder_path) / pathlib.Path(args.timestamp_file)
         timestamp_file.parent.mkdir(parents=True, exist_ok=True)
         open(timestamp_file, "w").close()  # Create or clear the timestamp file
-        
+    if args.angular_velocity_file is not None:
+        angular_velocity_file = pathlib.Path(args.output_folder_path) / pathlib.Path(args.angular_velocity_file)
+        angular_velocity_file.parent.mkdir(parents=True, exist_ok=True)
+        open(angular_velocity_file, "w").close()  # Create or clear the angular velocity file
+
     # Path interpolation
     path_positions: List = []
     path_rotations: List = []
@@ -51,7 +56,7 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
         r0 = waypoints[i]["rotation"]
         r1 = waypoints[i+1]["rotation"]
         dist = np.linalg.norm(p1 - p0)
-        seg_duration = int(dist / total_dist * duration * fps)
+        seg_duration = int(round(dist / total_dist * duration * fps))
 
         t = np.linspace(0, 1, seg_duration + 1)[:, None]
         positions = (1 - t) * p0 + t * p1
@@ -97,9 +102,8 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
     # Record images during linear motion 
     dt = 1.0 / fps
     current_time: float = 0.0
-    num_frames: int = 0
 
-    for pos, rot in tqdm(zip(path_positions, path_rotations), desc="Recording frames", total=len(path_positions)):
+    for num_frames, (pos, rot) in enumerate(tqdm(zip(path_positions, path_rotations), desc="Recording frames", total=len(path_positions))):
         # Set current state
         agent = sim.get_agent(0)
         state = agent.get_state()
@@ -121,9 +125,27 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
             with open(timestamp_file, "a") as f:
                 f.write(f"{current_time:.6f}\n")
 
+        # Save angular velocity if required
+        if angular_velocity_file is not None:
+            with open(angular_velocity_file, "a") as f:
+                if num_frames == 0:
+                    ang_vel = np.array([0.0, 0.0, 0.0])
+                else:
+                    prev_rot = path_rotations[num_frames - 1][0]
+                    delta_rot = rot[0] * prev_rot.conjugate()
+                    angle = 2 * np.arccos(np.clip(delta_rot.w, -1.0, 1.0))
+                    if angle > np.pi:
+                        angle -= 2 * np.pi
+                    axis = np.array([delta_rot.x, delta_rot.y, delta_rot.z])
+                    if np.linalg.norm(axis) < 1e-6:
+                        axis = np.array([0.0, 0.0, 0.0])
+                    else:
+                        axis = axis / np.linalg.norm(axis)
+                    ang_vel = (angle / dt) * axis
+                f.write(f"{current_time:.6f} {ang_vel[0]:.6f} {ang_vel[1]:.6f} {ang_vel[2]:.6f}\n")
+
         # Update timestamp and frame count
         current_time += dt
-        num_frames += 1
 
     sim.close()
     return None
@@ -185,7 +207,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--timestamp_file",
-        help="Path to the timestamp file",
+        help="File name to record the timestamps",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
+        "--angular_velocity_file",
+        help="File name to record the angular velocity",
         type=str,
         default=None,
         required=False,
