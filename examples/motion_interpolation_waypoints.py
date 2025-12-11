@@ -5,19 +5,29 @@ import pathlib
 import quaternion
 import argparse
 from tqdm import tqdm
-from typing import Optional
+from typing import Optional, List
+import json
 
 
-def linear_motion_with_target(args: argparse.Namespace) -> None:
+def load_waypoints(json_path: str) -> List[dict]:
+    with open(json_path, "r") as f:
+        data = json.load(f)
+    waypoints = []
+    for wp in data:
+        pos = np.array(wp["position"], dtype=float)
+        rot = quaternion.from_float_array(wp["rotation"])
+        waypoints.append({"position": pos, "rotation": rot})
+
+    return waypoints
+
+
+def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
     # Parameter setup
     scene_path: pathlib.Path = pathlib.Path(args.scene_path)
     output_folder_path = pathlib.Path(args.output_folder_path)
     (output_folder_path / "rgb").mkdir(parents=True, exist_ok=True)
     (output_folder_path / "semantic").mkdir(parents=True, exist_ok=True)
-    start_pos = np.array(args.start_pos)
-    end_pos = np.array(args.end_pos)
-    velocity = (end_pos - start_pos) / args.duration
-    init_orientation = quaternion.from_float_array(args.init_orientation)
+    waypoints: List[dict] = load_waypoints(args.json_waypoints)
     duration = args.duration
     fps = args.fps
     cam_width = args.cam_width
@@ -27,6 +37,36 @@ def linear_motion_with_target(args: argparse.Namespace) -> None:
         timestamp_file = pathlib.Path(args.output_folder_path) / pathlib.Path(args.timestamp_file)
         timestamp_file.parent.mkdir(parents=True, exist_ok=True)
         open(timestamp_file, "w").close()  # Create or clear the timestamp file
+        
+    # Path interpolation
+    path_positions: List = []
+    path_rotations: List = []
+    total_dist = sum(
+        np.linalg.norm(waypoints[i+1]["position"] - waypoints[i]["position"])
+        for i in range(len(waypoints) - 1)
+    )
+    for i in range(len(waypoints)-1):
+        p0 = waypoints[i]["position"]
+        p1 = waypoints[i+1]["position"]
+        r0 = waypoints[i]["rotation"]
+        r1 = waypoints[i+1]["rotation"]
+        dist = np.linalg.norm(p1 - p0)
+        seg_duration = int(dist / total_dist * duration * fps)
+
+        t = np.linspace(0, 1, seg_duration + 1)[:, None]
+        positions = (1 - t) * p0 + t * p1
+        rots = quaternion.slerp(r0, r1, 0, 1, t)
+
+        if i == 0:
+            # Put all for the first segment
+            path_positions.append(positions)
+            path_rotations.append(rots)
+        else:
+            # Remove the first point to avoid duplication
+            path_positions.append(positions[1:])
+            path_rotations.append(rots[1:])
+    path_positions = list(np.vstack(path_positions))
+    path_rotations = list(np.vstack(path_rotations))
 
     # Simulator configuration
     sim_cfg = habitat_sim.SimulatorConfiguration()
@@ -54,39 +94,36 @@ def linear_motion_with_target(args: argparse.Namespace) -> None:
     agent_cfg.sensor_specifications = sensor_specs
     sim = habitat_sim.Simulator(habitat_sim.Configuration(sim_cfg, [agent_cfg]))
 
-    # Set initial state
-    agent = sim.get_agent(0)
-    state = agent.get_state()
-    state.position = start_pos
-    state.rotation = init_orientation
-    agent.set_state(state)
-
-    # Record images during linear motion
-    num_frames = int(duration * fps)
+    # Record images during linear motion 
     dt = 1.0 / fps
     current_time: float = 0.0
+    num_frames: int = 0
 
-    for frame in tqdm(range(num_frames), desc="Recording frames"):
+    for pos, rot in tqdm(zip(path_positions, path_rotations), desc="Recording frames", total=len(path_positions)):
+        # Set current state
+        agent = sim.get_agent(0)
+        state = agent.get_state()
+        state.position = pos.astype(np.float32)
+        state.rotation = rot[0]
+        agent.set_state(state)
+        
         # Get observations
         observation = sim.get_sensor_observations()
         rgb_image = observation["rgb_camera"]
         semantic_image = observation["semantic_camera"]
 
         # Save image to output folder
-        plt.imsave(output_folder_path / "rgb" / f"{frame:06d}.png", rgb_image)
-        plt.imsave(output_folder_path / "semantic" / f"{frame:06d}.png", semantic_image)
+        plt.imsave(output_folder_path / "rgb" / f"{num_frames:06d}.png", rgb_image)
+        plt.imsave(output_folder_path / "semantic" / f"{num_frames:06d}.png", semantic_image)
         
         # Save timestamp if required
         if timestamp_file is not None:
             with open(timestamp_file, "a") as f:
                 f.write(f"{current_time:.6f}\n")
 
-        # Update agent position and orientation
-        agent = sim.get_agent(0)
-        state = agent.get_state()
-        state.position += velocity * dt
-        agent.set_state(state)
+        # Update timestamp and frame count
         current_time += dt
+        num_frames += 1
 
     sim.close()
     return None
@@ -98,8 +135,7 @@ if __name__ == "__main__":
                                      || Example usage: python examples/linear_motion_with_target.py
                                      --scene_path /data/Replica/room_0/habitat/mesh_semantic.ply 
                                      --output_folder_path data/tmp 
-                                     --start_pos 4.6 -0.32 -0.86 --end_pos 2.3 -0.32 -0.86
-                                     --init_orientation 0.0 0.0 1.0 0.0 --duration 5.0 --fps 10 
+                                     --json_waypoints data/tmp/waypoints.json --duration 5.0 --fps 10 
                                      --cam_width 640 --cam_height 480
                                      """
     )
@@ -118,25 +154,10 @@ if __name__ == "__main__":
         required=True,
     )
     parser.add_argument(
-        "--start_pos",
-        help="Starting position of the agent",
-        type=float,
-        nargs=3,
-        default=[4.6, -0.32, -0.86],
-    )
-    parser.add_argument(
-        "--end_pos",
-        help="End position of the agent",
-        type=float,
-        nargs=3,
-        default=[2.3, -0.32, -0.86],
-    )
-    parser.add_argument(
-        "--init_orientation",
-        help="Initial orientation of the agent",
-        type=float,
-        nargs=4,
-        default=[0.0, 0.0, 1.0, 0.0],
+        "--json_waypoints",
+        help="Path to the waypoints JSON file",
+        type=str,
+        required=True,
     )
     parser.add_argument(
         "--duration",
@@ -171,4 +192,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    linear_motion_with_target(args)
+    motion_interpolation_waypoints(args)
