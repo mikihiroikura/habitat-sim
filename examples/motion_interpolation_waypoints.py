@@ -50,13 +50,22 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
         np.linalg.norm(waypoints[i+1]["position"] - waypoints[i]["position"])
         for i in range(len(waypoints) - 1)
     )
+    total_rot_dist = sum(
+        quaternion.rotation_intrinsic_distance(waypoints[i]["rotation"], waypoints[i+1]["rotation"])
+        for i in range(len(waypoints) - 1)
+    )
     for i in range(len(waypoints)-1):
         p0 = waypoints[i]["position"]
         p1 = waypoints[i+1]["position"]
         r0 = waypoints[i]["rotation"]
         r1 = waypoints[i+1]["rotation"]
         dist = np.linalg.norm(p1 - p0)
-        seg_duration = int(round(dist / total_dist * duration * fps))
+        rot_dist = quaternion.rotation_intrinsic_distance(r0, r1)
+        seg_duration = 0
+        if total_dist > 0:
+            seg_duration = int(round(dist / total_dist * duration * fps))
+        else:
+            seg_duration = int(round(rot_dist / total_rot_dist * duration * fps))
 
         t = np.linspace(0, 1, seg_duration + 1)[:, None]
         positions = (1 - t) * p0 + t * p1
@@ -154,7 +163,7 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="""Record RGB images from moving camera sensor in a Habitat-Sim simulator.
-                                     || Example usage: python examples/linear_motion_with_target.py
+                                     || Example usage: python examples/motion_interpolation_waypoints.py
                                      --scene_path /data/Replica/room_0/habitat/mesh_semantic.ply 
                                      --output_folder_path data/tmp 
                                      --json_waypoints data/tmp/waypoints.json --duration 5.0 --fps 10 

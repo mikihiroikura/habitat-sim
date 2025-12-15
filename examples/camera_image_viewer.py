@@ -126,7 +126,7 @@ def camera_image_viewer(args: argparse.Namespace) -> None:
         rgb_image = observations["rgb_camera"]
 
         # Display the RGB image
-        cv2.imshow("RGB Camera View", rgb_image)
+        cv2.imshow("RGB Camera View", cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR))
         k = cv2.waitKey(30)
 
         # Break the loop on 'ESC' key press

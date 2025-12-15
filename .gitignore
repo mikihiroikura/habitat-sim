@@ -189,3 +189,4 @@ pre-commit-deps.txt
 /tools/qa_scenes/qa_scenes_output/
 
 examples/tutorials/semantic_object_tutorial_output/
+examples/notebooks/
