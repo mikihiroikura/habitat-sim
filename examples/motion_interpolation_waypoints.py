@@ -21,6 +21,30 @@ def load_waypoints(json_path: str) -> List[dict]:
     return waypoints
 
 
+def get_camera_intrinsics(sim: habitat_sim.Simulator, sensor_name: str) -> np.ndarray:
+    # Get render camera
+    render_camera = sim._sensors[sensor_name]._sensor_object.render_camera
+
+    # Get projection matrix
+    projection_matrix = render_camera.projection_matrix
+
+    # Get resolution
+    viewport_size = render_camera.viewport
+
+    # Intrinsic calculation
+    fx = projection_matrix[0, 0] * viewport_size[0] / 2.0
+    fy = projection_matrix[1, 1] * viewport_size[1] / 2.0
+    cx = (projection_matrix[2, 0] + 1.0) * viewport_size[0] / 2.0
+    cy = (projection_matrix[2, 1] + 1.0) * viewport_size[1] / 2.0
+
+    intrinsics = np.array([
+        [fx, 0, cx],
+        [0, fy, cy],
+        [0,  0,  1]
+    ])
+    return intrinsics
+
+
 def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
     # Parameter setup
     scene_path: pathlib.Path = pathlib.Path(args.scene_path)
@@ -34,6 +58,7 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
     cam_height = args.cam_height
     timestamp_file: Optional[pathlib.Path] = None
     angular_velocity_file: Optional[pathlib.Path] = None
+    cam_intrinsics_file: Optional[pathlib.Path] = None
     if args.timestamp_file is not None:
         timestamp_file = pathlib.Path(args.output_folder_path) / pathlib.Path(args.timestamp_file)
         timestamp_file.parent.mkdir(parents=True, exist_ok=True)
@@ -42,6 +67,10 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
         angular_velocity_file = pathlib.Path(args.output_folder_path) / pathlib.Path(args.angular_velocity_file)
         angular_velocity_file.parent.mkdir(parents=True, exist_ok=True)
         open(angular_velocity_file, "w").close()  # Create or clear the angular velocity file
+    if args.cam_intrinsic_file is not None:
+        cam_intrinsics_file = pathlib.Path(args.output_folder_path) / pathlib.Path(args.cam_intrinsic_file)
+        cam_intrinsics_file.parent.mkdir(parents=True, exist_ok=True)
+        open(cam_intrinsics_file, "w").close()  # Create or clear the camera intrinsics file
 
     # Path interpolation
     path_positions: List = []
@@ -107,6 +136,11 @@ def motion_interpolation_waypoints(args: argparse.Namespace) -> None:
     agent_cfg = habitat_sim.agent.AgentConfiguration()
     agent_cfg.sensor_specifications = sensor_specs
     sim = habitat_sim.Simulator(habitat_sim.Configuration(sim_cfg, [agent_cfg]))
+
+    # Record camera intrinsics if required
+    if cam_intrinsics_file is not None:
+        cam_intrinsics = get_camera_intrinsics(sim, "rgb_camera")
+        np.savetxt(cam_intrinsics_file, cam_intrinsics, fmt="%.6f")
 
     # Record images during linear motion 
     dt = 1.0 / fps
@@ -224,6 +258,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--angular_velocity_file",
         help="File name to record the angular velocity",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
+        "--cam_intrinsic_file",
+        help="File name to record the camera intrinsics",
         type=str,
         default=None,
         required=False,
