@@ -204,9 +204,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--is_dynamic_ang_vel",
-        help="Indicates if the angular velocity is dynamically changing over time (True) or constant (False)",
-        type=bool,
-        default=True,
+        help="Indicates if the angular velocity is dynamically changing (sinusoidal)",
+        action="store_true",
     )
     parser.add_argument(
         "--cam_width",
