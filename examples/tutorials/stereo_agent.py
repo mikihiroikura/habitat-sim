@@ -10,12 +10,18 @@ import numpy as np
 import quaternion  # noqa: F401
 
 import habitat_sim
+from habitat_sim.utils.common import d3_40_colors_rgb
 
 cv2 = None
 
+def semantic_to_rgb(semantic_obs):
+    # semantic_obs は (H, W) の形状で、各ピクセルにオブジェクトIDが入っています。
+    # d3_40_colors_rgb は40色のリストです。IDを40で割った余りを使って色を割り当てます。
+    semantic_img = d3_40_colors_rgb[semantic_obs % 40]
+    return semantic_img
 
 # Helper function to render observations from the stereo agent
-def _render(sim, display, depth=False):
+def _render(sim, display, depth=False, semantic=False):
     for _ in range(100):
         # Just spin in a circle
         obs = sim.step("turn_right")
@@ -27,6 +33,9 @@ def _render(sim, display, depth=False):
         if depth:
             stereo_pair = np.clip(stereo_pair, 0, 10)
             stereo_pair /= 10.0
+            
+        if semantic:
+            stereo_pair = semantic_to_rgb(stereo_pair)
 
         # If in RGB/RGBA format, change first to RGB and change to BGR
         if len(stereo_pair.shape) > 2:
@@ -52,8 +61,9 @@ def main(display=True):
 
     backend_cfg = habitat_sim.SimulatorConfiguration()
     backend_cfg.scene_id = (
-        "data/scene_datasets/habitat-test-scenes/skokloster-castle.glb"
+        "/data/Replica/room_0/habitat/mesh_semantic.ply"
     )
+    backend_cfg.enable_physics = True
 
     # First, let's create a stereo RGB agent
     left_rgb_sensor = habitat_sim.bindings.CameraSensorSpec()
@@ -78,6 +88,17 @@ def main(display=True):
     agent_config.sensor_specifications = [left_rgb_sensor, right_rgb_sensor]
 
     sim = habitat_sim.Simulator(habitat_sim.Configuration(backend_cfg, [agent_config]))
+
+    sim.pathfinder.load_nav_mesh("/data/Replica/room_0/habitat/mesh_semantic.navmesh")
+    print(f"NavMesh bounds: {sim.pathfinder.get_bounds()}") # ロード確認用（範囲を表示）
+        
+    # ランダムな有効座標を取得
+    start_pos = sim.pathfinder.get_random_navigable_point()
+    
+    agent = sim.get_agent(0)
+    new_state = agent.get_state()
+    new_state.position = start_pos
+    agent.set_state(new_state)
 
     _render(sim, display)
     sim.close()
@@ -105,6 +126,30 @@ def main(display=True):
     sim = habitat_sim.Simulator(habitat_sim.Configuration(backend_cfg, [agent_config]))
 
     _render(sim, display, depth=True)
+    
+    # Now let's do the exact same thing but for a depth camera stereo pair!
+    left_semantic_camera = habitat_sim.CameraSensorSpec()
+    left_semantic_camera.uuid = "left_sensor"
+    left_semantic_camera.resolution = [512, 512]
+    left_semantic_camera.position = 1.5 * habitat_sim.geo.UP + 0.25 * habitat_sim.geo.LEFT
+    # The only difference is that we set the sensor type to SEMANTIC
+    left_semantic_camera.sensor_type = habitat_sim.SensorType.SEMANTIC
+
+    right_semantic_camera = habitat_sim.CameraSensorSpec()
+    right_semantic_camera.uuid = "right_sensor"
+    right_semantic_camera.resolution = [512, 512]
+    right_semantic_camera.position = (
+        1.5 * habitat_sim.geo.UP + 0.25 * habitat_sim.geo.RIGHT
+    )
+    # The only difference is that we set the sensor type to SEMANTIC
+    right_semantic_camera.sensor_type = habitat_sim.SensorType.SEMANTIC 
+
+    agent_config = habitat_sim.AgentConfiguration()
+    agent_config.sensor_specifications = [left_semantic_camera, right_semantic_camera]
+
+    sim = habitat_sim.Simulator(habitat_sim.Configuration(backend_cfg, [agent_config]))
+
+    _render(sim, display, depth=False, semantic=True)
 
 
 if __name__ == "__main__":

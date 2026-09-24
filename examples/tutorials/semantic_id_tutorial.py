@@ -20,7 +20,7 @@ output_path = os.path.join(dir_path, "semantic_object_tutorial_output/")
 save_index = 0
 
 
-def show_img(data, save):
+def show_img(data, show, save):
     # display rgb and semantic images side-by-side
     fig = plt.figure(figsize=(12, 12))
     ax1 = fig.add_subplot(1, 2, 1)
@@ -30,14 +30,15 @@ def show_img(data, save):
     ax2.axis("off")
     ax2.imshow(data[1], interpolation="nearest")
     plt.axis("off")
-    plt.show(block=False)
+    if show:
+        plt.show(block=False)
     if save:
         global save_index
         plt.savefig(
             output_path + str(save_index) + ".jpg",
             bbox_inches="tight",
             pad_inches=0,
-            quality=50,
+            # quality=50,
         )
         save_index += 1
     plt.pause(1)
@@ -47,8 +48,7 @@ def get_obs(sim, show, save):
     # render sensor outputs and optionally show them
     rgb_obs = sim.get_sensor_observations()["rgba_camera"]
     semantic_obs = sim.get_sensor_observations()["semantic_camera"]
-    if show:
-        show_img((rgb_obs, semantic_obs), save)
+    show_img((rgb_obs, semantic_obs), show, save)
 
 
 def place_agent(sim):
