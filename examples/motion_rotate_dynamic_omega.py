@@ -81,7 +81,9 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
     path_rotations: List = []
     path_angvels: List = []
     for time in np.arange(0, duration, 1.0 / fps):
-        ang_vel = 2 * np.pi / duration + np.pi / 6.0 * np.sin(2 * np.pi * time / duration)  # Example angular velocity profile
+        ang_vel = 2 * np.pi / duration
+        if args.is_dynamic_ang_vel:
+            ang_vel += np.pi / 6.0 * np.sin(2 * np.pi * time / duration)
         delta_angle = ang_vel * (1.0 / fps)
         delta_rot = quaternion.from_rotation_vector([0.0, delta_angle, 0.0])  # Rotate around Y-axis
         current_rot = delta_rot * current_rot
@@ -199,6 +201,12 @@ if __name__ == "__main__":
         help="Frames per second for recording",
         type=int,
         default=10,
+    )
+    parser.add_argument(
+        "--is_dynamic_ang_vel",
+        help="Indicates if the angular velocity is dynamically changing over time (True) or constant (False)",
+        type=bool,
+        default=True,
     )
     parser.add_argument(
         "--cam_width",
