@@ -3,6 +3,7 @@ import habitat_sim
 from matplotlib import pyplot as plt
 import pathlib
 import argparse
+import json
 from tqdm import tqdm
 from typing import Optional, List
 
@@ -82,6 +83,19 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
     imu_file: Optional[pathlib.Path] = None
     center = np.array(args.center, dtype=float)
     radius = args.radius
+    if args.config_yaml is not None:
+        config_yaml_path = pathlib.Path(args.config_yaml)
+        config_yaml_path.parent.mkdir(parents=True, exist_ok=True)
+        center_yaml = ", ".join(f"{coordinate:.12g}" for coordinate in center)
+        with open(config_yaml_path, "w", encoding="utf-8") as f:
+            f.write(f"scene_path: {json.dumps(str(scene_path))}\n")
+            f.write(f"duration_circle: {duration_one_circle}\n")
+            f.write(f"fps: {fps}\n")
+            f.write(f"num_rotations: {num_rotations}\n")
+            f.write(f"center: [{center_yaml}]\n")
+            f.write(f"radius: {radius}\n")
+            f.write(f"cam_width: {cam_width}\n")
+            f.write(f"cam_height: {cam_height}\n")
     if args.timestamp_file is not None:
         timestamp_file = pathlib.Path(args.output_folder_path) / pathlib.Path(args.timestamp_file)
         timestamp_file.parent.mkdir(parents=True, exist_ok=True)
@@ -325,6 +339,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--imu_file",
         help="File name to record the IMU data",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
+        "--config_yaml",
+        help="Path to save the run configuration as a YAML file",
         type=str,
         default=None,
         required=False,
