@@ -218,9 +218,6 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
                     f"{imu_linear_acceleration[2]:.6f}\n"
                 )
 
-        # Update timestamp and frame count
-        current_time += dt
-
         # Save ground truth pose if required
         if gt_pose_file is not None:
             with open(gt_pose_file, "a") as f:
@@ -233,6 +230,9 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
                     f"{kalibr_rot.x:.6f} {kalibr_rot.y:.6f} "
                     f"{kalibr_rot.z:.6f} {kalibr_rot.w:.6f}\n"
                 )
+
+        # Update timestamp and frame count
+        current_time += dt
 
     sim.close()
     return None
