@@ -151,7 +151,14 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
         # Save angular velocity if required
         if angular_velocity_file is not None:
             with open(angular_velocity_file, "a") as f:
-                f.write(f"{current_time:.6f} {0:.6f} {ang_vel:.6f} {0:.6f}\n")
+                # Convert the Habitat-Sim angular-velocity vector to Kalibr
+                # axes (X unchanged, Y/Z reversed). This trajectory rotates
+                # around Habitat-Sim +Y, so the Kalibr component is -Y.
+                kalibr_ang_vel = np.array([0.0, ang_vel, 0.0]) * np.array([1.0, -1.0, -1.0])
+                f.write(
+                    f"{current_time:.6f} {kalibr_ang_vel[0]:.6f} "
+                    f"{kalibr_ang_vel[1]:.6f} {kalibr_ang_vel[2]:.6f}\n"
+                )
 
         # Update timestamp and frame count
         current_time += dt
