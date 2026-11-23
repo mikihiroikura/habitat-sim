@@ -8,36 +8,36 @@ from tqdm import tqdm
 from typing import Optional, List
 
 
-def get_camera_pose(center, radius, duration, t):
-    velocity = 2 * np.pi * radius / duration
-    omega = velocity / radius
-    theta = omega * t
+def get_camera_pose(center, radius, duration_circle, accel_duration, t):
+    """Circular motion with smooth acceleration, then constant speed.
 
-    # Position in Habitat world coordinates
-    position = np.array([
-        radius * np.cos(theta),
-        0,
-        radius * np.sin(theta)
-    ]) + center
+    Returns position, quaternion, yaw-rate magnitude, tangential acceleration.
+    The constant-speed phase takes duration_circle seconds per revolution.
+    """
+    omega_max = 2.0 * np.pi / duration_circle
+    if accel_duration > 0.0 and t < accel_duration:
+        u = t / accel_duration
+        smooth = 3.0 * u**2 - 2.0 * u**3
+        omega = omega_max * smooth
+        alpha = omega_max * (6.0 * u - 6.0 * u**2) / accel_duration
+        theta = omega_max * accel_duration * (u**3 - 0.5 * u**4)
+    else:
+        omega = omega_max
+        alpha = 0.0
+        theta = omega_max * (t - 0.5 * accel_duration)
 
-    # Forward direction = tangent of circle
-    direction = np.array([
-        -np.sin(theta),
-        0.0,
-        np.cos(theta)
+    position = np.asarray(center, dtype=float) + np.array([
+        radius * np.cos(theta), 0.0, radius * np.sin(theta)
     ])
 
-    # Habitat camera forward axis is -Z
-    yaw = np.arctan2(-direction[0], -direction[2])
-
+    # Habitat camera forward is -Z. Tangent points along increasing theta.
+    # Unwrapped yaw avoids a discontinuity at +/-pi.
+    yaw = np.pi - theta
     rotation = np.quaternion(
-        np.cos(yaw / 2),
-        0.0,
-        np.sin(yaw / 2),
-        0.0
+        np.cos(yaw / 2.0), 0.0, np.sin(yaw / 2.0), 0.0
     )
-
-    return position, rotation
+    tangential_acceleration = radius * alpha
+    return position, rotation, omega, tangential_acceleration
 
 
 def get_camera_intrinsics(sim: habitat_sim.Simulator, sensor_name: str) -> np.ndarray:
@@ -72,7 +72,10 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
     (output_folder_path / "semantic").mkdir(parents=True, exist_ok=True)
     duration_one_circle = args.duration_circle
     num_rotations = args.num_rotations
-    total_duration = duration_one_circle * num_rotations
+    accel_duration = args.accel_duration
+    if duration_one_circle <= 0 or args.radius <= 0 or accel_duration < 0 or num_rotations < 1 or args.fps <= 0:
+        raise ValueError("duration_circle, radius, fps must be positive; accel_duration >= 0; num_rotations >= 1")
+    total_duration = accel_duration + duration_one_circle * num_rotations
     fps = args.fps
     cam_width = args.cam_width
     cam_height = args.cam_height
@@ -90,6 +93,7 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
         with open(config_yaml_path, "w", encoding="utf-8") as f:
             f.write(f"scene_path: {json.dumps(str(scene_path))}\n")
             f.write(f"duration_circle: {duration_one_circle}\n")
+            f.write(f"accel_duration: {accel_duration}\n")
             f.write(f"fps: {fps}\n")
             f.write(f"num_rotations: {num_rotations}\n")
             f.write(f"center: [{center_yaml}]\n")
@@ -117,17 +121,22 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
         imu_file.parent.mkdir(parents=True, exist_ok=True)
         open(imu_file, "w").close()  # Create or clear the IMU data file
 
-    # Path generation with angular velocity
+    # Include the final sample at the end of the constant-speed phase.
+    sample_times = np.arange(int(np.ceil(total_duration * fps)) + 1) / fps
+    sample_times = sample_times[sample_times < total_duration]
+    sample_times = np.append(sample_times, total_duration)
     path_positions: List = []
     path_rotations: List = []
     path_angvels: List = []
-    for time in np.arange(0, total_duration, 1.0 / fps):
-        pos, rot = get_camera_pose(center, radius, duration_one_circle, time)
+    path_tangential_accels: List = []
+    for time in sample_times:
+        pos, rot, ang_vel, a_t = get_camera_pose(
+            center, radius, duration_one_circle, accel_duration, time
+        )
         path_positions.append(pos)
         path_rotations.append(rot)
-        # For simplicity, we assume a constant angular velocity
-        ang_vel = 2 * np.pi / duration_one_circle
         path_angvels.append(ang_vel)
+        path_tangential_accels.append(a_t)
 
     # Simulator configuration
     sim_cfg = habitat_sim.SimulatorConfiguration()
@@ -161,10 +170,10 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
         np.savetxt(cam_intrinsics_file, cam_intrinsics, fmt="%.6f")
 
     # Record images during linear motion 
-    dt = 1.0 / fps
-    current_time: float = 0.0
-
-    for num_frames, (pos, rot, ang_vel) in enumerate(tqdm(zip(path_positions, path_rotations, path_angvels), desc="Recording frames", total=len(path_positions))):
+    for num_frames, (current_time, pos, rot, ang_vel, a_t) in enumerate(tqdm(
+        zip(sample_times, path_positions, path_rotations, path_angvels, path_tangential_accels),
+        desc="Recording frames", total=len(path_positions)
+    )):
         # Set current state
         agent = sim.get_agent(0)
         state = agent.get_state()
@@ -200,7 +209,7 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
         if imu_file is not None:
             habitat_to_kalibr_axes = np.array([1.0, -1.0, -1.0])
             habitat_angular_velocity = np.array([0.0, -ang_vel, 0.0])
-            habitat_linear_acceleration = np.array([radius * ang_vel**2, 0.0, 0.0])
+            habitat_linear_acceleration = np.array([radius * ang_vel**2, 0.0, -a_t])
             gravity_magnitude = 9.80665  # m/s^2
             habitat_gravity = np.array([0.0, -gravity_magnitude, 0.0])
             # An accelerometer measures specific force: a - g, not a alone.
@@ -231,8 +240,6 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
                     f"{kalibr_rot.z:.6f} {kalibr_rot.w:.6f}\n"
                 )
 
-        # Update timestamp and frame count
-        current_time += dt
 
     sim.close()
     return None
@@ -242,7 +249,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="""Record RGB images from moving camera sensor in a Habitat-Sim simulator.
                                      This script records a circular motion around a specified center.
-                                     The IMU and GT pose data are recorded in Kalibr axes convention (X forward, Y left, Z up).
+                                     The IMU and GT pose data use camera optical axes (X right, Y down, Z forward).
                                      || Example usage: python examples/motion_rotate_dynamic_omega.py
                                      --scene_path /data/Replica/room_0/habitat/mesh_semantic.ply 
                                      --output_folder_path data/tmp 
@@ -266,9 +273,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--duration_circle",
-        help="Duration of the circular motion in seconds",
+        help="Seconds per revolution during the constant-speed phase",
         type=float,
         default=10.0,
+    )
+    parser.add_argument(
+        "--accel_duration",
+        help="Seconds to accelerate smoothly from rest to circular cruising speed",
+        type=float,
+        default=2.0,
     )
     parser.add_argument(
         "--fps",
