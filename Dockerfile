@@ -92,7 +92,7 @@ RUN chown -R $UNAME:$UNAME ${CODE_DIR} ${CONDA_DIR}
 
 # Install requirements.txt
 COPY . $CODE_DIR/habitat-sim
-RUN cd $CODE_DIR/habitat-sim && /bin/bash -c ". activate habitat; conda install -n habitat -c conda-forge --file requirements.txt"
+RUN cd $CODE_DIR/habitat-sim && /bin/bash -c ". activate habitat; conda install -y -n habitat -c conda-forge --file requirements.txt"
 
 # Silence habitat-sim logs
 ENV GLOG_minloglevel=2

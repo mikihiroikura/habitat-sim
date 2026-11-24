@@ -11,3 +11,4 @@ tqdm
 ipykernel
 opencv
 pathlib
+rosbags
