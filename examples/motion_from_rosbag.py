@@ -137,7 +137,7 @@ def read_rosbag_trajectory(
     return frame_times, path_positions, path_rotations
 
 
-def write_rosbag_imu(rosbag_path: pathlib.Path, output_path: pathlib.Path, imu_topic: str) -> int:
+def write_rosbag_imu(rosbag_path: pathlib.Path, output_path: pathlib.Path, imu_topic: str, stop_recording_time: float) -> int:
     """Write every sensor_msgs/Imu message with time relative to bag start."""
     message_count = 0
     with AnyReader([rosbag_path]) as input_bag:
@@ -166,11 +166,15 @@ def write_rosbag_imu(rosbag_path: pathlib.Path, output_path: pathlib.Path, imu_t
                 )
                 message_count += 1
 
+                if stop_recording_time > 0 and relative_time_s >= stop_recording_time:
+                    print(f"Reached stop recording time: {stop_recording_time:.2f}s. Stopping.")
+                    break
+
     return message_count
 
 
 
-def write_rosbag_gtpose(rosbag_path: pathlib.Path, output_path: pathlib.Path, gtpose_topic: str) -> int:
+def write_rosbag_gtpose(rosbag_path: pathlib.Path, output_path: pathlib.Path, gtpose_topic: str, stop_recording_time: float) -> int:
     """Write PoseStamped GT poses with time relative to bag start.
 
     Each output row contains relative time, position (x, y, z), and quaternion
@@ -201,6 +205,10 @@ def write_rosbag_gtpose(rosbag_path: pathlib.Path, output_path: pathlib.Path, gt
                     f"{orientation.z:.9f} {orientation.w:.9f}\n"
                 )
                 message_count += 1
+
+                if stop_recording_time > 0 and relative_time_s >= stop_recording_time:
+                    print(f"Reached stop recording time: {stop_recording_time:.2f}s. Stopping.")
+                    break
 
     return message_count
 
@@ -299,12 +307,13 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
 
     # Record IMU data from rosbag if required
     if imu_file is not None:
-        imu_message_count = write_rosbag_imu(rosbag_path, imu_file, imu_rostopic)
+        imu_message_count = write_rosbag_imu(rosbag_path, imu_file, imu_rostopic, stop_recording_time)
         print(f"Wrote {imu_message_count} IMU messages to {imu_file}")
 
+    # Record GT poses from rosbag if required
     if gt_pose_file is not None:
         gtpose_message_count = write_rosbag_gtpose(
-            rosbag_path, gt_pose_file, gt_pose_rostopic
+            rosbag_path, gt_pose_file, gt_pose_rostopic, stop_recording_time
         )
         print(f"Wrote {gtpose_message_count} GT poses to {gt_pose_file}")
 
