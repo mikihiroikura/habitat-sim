@@ -118,6 +118,26 @@ Conda packages for older versions can installed by explicitly specifying the ver
 
 We also provide a [nightly conda build for the main branch](https://anaconda.org/aihabitat-nightly). However, this should only be used if you need a specific feature not yet in the latest release version. To get the nightly build of the latest main, simply swap `-c aihabitat` for `-c aihabitat-nightly`.
 
+### Docker environment
+```
+docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g)  -t habitat:latest .
+```
+
+## How to use python scripts in examples
+- camera_image_viewer.py
+  - Visualize RGB images with GUI
+  - Change camera pose by pressing buttons
+  - Record camera pose into .json file
+   ```
+   python examples/camera_image_viewer.py -s /data/Replica/room_0/habitat/mesh_semantic.ply --navmesh_path /data/Replica/room_0/habitat/mesh_semantic.navmesh 
+   ```
+- motion_interpolation_waypoints.py
+- motion_from_rosbag.py
+- motion_circular.py
+- motion_figure8.py
+- motion_rotate_dynamic_omega.py
+
+
 ## Testing
 
 1. Let's download some 3D assets using our python data download utility:
