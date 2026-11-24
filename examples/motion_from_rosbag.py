@@ -167,7 +167,6 @@ def write_rosbag_imu(rosbag_path: pathlib.Path, output_path: pathlib.Path, imu_t
                 message_count += 1
 
                 if stop_recording_time > 0 and relative_time_s >= stop_recording_time:
-                    print(f"Reached stop recording time: {stop_recording_time:.2f}s. Stopping.")
                     break
 
     return message_count
@@ -207,7 +206,6 @@ def write_rosbag_gtpose(rosbag_path: pathlib.Path, output_path: pathlib.Path, gt
                 message_count += 1
 
                 if stop_recording_time > 0 and relative_time_s >= stop_recording_time:
-                    print(f"Reached stop recording time: {stop_recording_time:.2f}s. Stopping.")
                     break
 
     return message_count
@@ -345,8 +343,10 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
                 
         # Stop recording if the specified stop time is reached
         if stop_recording_time > 0 and current_time >= stop_recording_time:
-            print(f"Reached stop recording time: {stop_recording_time:.2f}s. Stopping.")
             break
+
+    if stop_recording_time > 0:
+        print(f"Reached stop recording time: {stop_recording_time:.2f}s. Stopping.")
 
     sim.close()
     return None
