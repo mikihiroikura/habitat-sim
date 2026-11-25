@@ -1,7 +1,10 @@
 import numpy as np
 import habitat_sim
 from matplotlib import pyplot as plt
-from scipy.spatial.transform import Rotation, Slerp
+from scipy.spatial.transform import Rotation, Slerp, RotationSpline
+from scipy.interpolate import CubicSpline
+from scipy.signal import butter, sosfiltfilt
+import quaternion
 import pathlib
 import argparse
 import json
@@ -34,12 +37,45 @@ def get_camera_intrinsics(sim: habitat_sim.Simulator, sensor_name: str) -> np.nd
     return intrinsics
 
 
+def smooth_optitrack(times, positions, rotations, frame_times, cutoff):
+    """Resample on a uniform grid, filter poses, then interpolate for rendering."""
+    if cutoff <= 0 or len(times) < 2:
+        return (np.column_stack([np.interp(frame_times, times, positions[:, i])
+                                 for i in range(3)]),
+                Slerp(times, rotations)(frame_times))
+    duration = times[-1] - times[0]
+    fs = (len(times) - 1) / duration
+    if cutoff >= fs / 2:
+        raise ValueError(f"Pose cutoff must be below Nyquist ({fs/2:.3f} Hz)")
+    uniform = np.linspace(times[0], times[-1], len(times))
+    p = np.column_stack([np.interp(uniform, times, positions[:, i])
+                         for i in range(3)])
+    q = Slerp(times, rotations)(uniform).as_quat()
+    # Resolve quaternion double-cover before component-wise filtering.
+    for i in range(1, len(q)):
+        if np.dot(q[i-1], q[i]) < 0:
+            q[i] *= -1
+    sos = butter(4, cutoff, fs=fs, output="sos")
+    p_filtered = sosfiltfilt(sos, p, axis=0)
+    q_filtered = sosfiltfilt(sos, q, axis=0)
+    norms = np.linalg.norm(q_filtered, axis=1, keepdims=True)
+    if np.any(norms < 1e-8):
+        raise ValueError("Degenerate filtered quaternion; increase pose cutoff")
+    r_filtered = Rotation.from_quat(q_filtered / norms)
+    print(f"Pose smoothing: fs={fs:.3f} Hz, cutoff={cutoff:.3f} Hz")
+    print("Position smoothing RMS [m]:", np.sqrt(np.mean(np.sum((p_filtered-p)**2, axis=1))))
+    print("Orientation smoothing RMS [deg]:", np.rad2deg(np.sqrt(np.mean((Rotation.from_quat(q).inv()*r_filtered).magnitude()**2))))
+    return (CubicSpline(uniform, p_filtered, axis=0)(frame_times),
+            RotationSpline(uniform, r_filtered)(frame_times))
+
+
 def read_rosbag_trajectory(
     rosbag_path: pathlib.Path,
     topic: str,
     fps: int,
     init_pos: np.ndarray,
     init_quat: np.ndarray,
+    pose_cutoff: float = 10.0,
 ):
     """Read and resample poses, aligning the first pose to the requested start pose."""
     if fps <= 0:
@@ -110,12 +146,11 @@ def read_rosbag_trajectory(
         else:
             frame_times[-1] = sample_times[-1]
 
-        path_positions = np.column_stack([
-            np.interp(frame_times, sample_times, source_positions[:, axis])
-            for axis in range(3)
-        ])
         source_rotations = Rotation.from_quat(source_quaternions)
-        sampled_rotations = Slerp(sample_times, source_rotations)(frame_times)
+        path_positions, sampled_rotations = smooth_optitrack(
+            sample_times, source_positions, source_rotations,
+            frame_times, pose_cutoff
+        )
 
     # DAVIS Optical Frame <-> Habitat Camera Frame
     R_optical_habitat = Rotation.from_matrix(
@@ -262,6 +297,7 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
             f.write(f"rosbag_path: {json.dumps(str(rosbag_path))}\n")
             f.write(f"gt_pose_rostopic: {json.dumps(gt_pose_rostopic)}\n")
             f.write(f"fps: {fps}\n")
+            f.write(f"pose_cutoff: {args.pose_cutoff}\n")
             f.write(f"cam_width: {cam_width}\n")
             f.write(f"cam_height: {cam_height}\n")
             f.write(f"init_pos: {json.dumps(args.init_pos)}\n")
@@ -296,6 +332,7 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
         fps,
         np.asarray(args.init_pos, dtype=float),
         np.asarray(args.init_quat, dtype=float),
+        args.pose_cutoff,
     )
 
     # Simulator configuration
@@ -343,6 +380,12 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
         )
         print(f"Wrote {gtpose_message_count} GT poses to {gt_pose_file}")
 
+    rendered_gt = None
+    if args.rendered_gt_file is not None:
+        rendered_gt = output_folder_path / args.rendered_gt_file
+        rendered_gt.parent.mkdir(parents=True, exist_ok=True)
+        rendered_gt.write_text("")
+
     # Record images along the trajectory extracted from the rosbag.
     for num_frames, (current_time, pos, rot) in enumerate(tqdm(
         zip(sample_times, path_positions, path_rotations),
@@ -355,6 +398,14 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
         state.rotation = rot
         agent.set_state(state)
         
+        if rendered_gt is not None:
+            sensor_state = agent.get_state().sensor_states["rgb_camera"]
+            q = sensor_state.rotation
+            optical = Rotation.from_quat([q.x, q.y, q.z, q.w]) * Rotation.from_rotvec([np.pi, 0, 0])
+            row = np.r_[current_time, sensor_state.position, optical.as_quat()]
+            with rendered_gt.open("a") as f:
+                f.write(" ".join(f"{v:.12f}" for v in row) + "\n")
+
         # Get observations
         observation = sim.get_sensor_observations()
         rgb_image = observation["rgb_camera"]
@@ -511,6 +562,12 @@ if __name__ == "__main__":
         metavar=("HFOV"),
         help="Horizontal field of view for the RGB camera in degrees"
     )
+    parser.add_argument("--pose_cutoff", type=float, default=10.0,
+                        help="Pose low-pass cutoff in Hz; 0 disables smoothing")
+    parser.add_argument("--rendered_gt_file", type=str, default=None,
+                        help="Save rendered optical camera poses in TUM format")
     args = parser.parse_args()
+    if args.pose_cutoff < 0:
+        parser.error("--pose_cutoff must be non-negative")
 
     motion_rotate_dynamic_omega(args)
