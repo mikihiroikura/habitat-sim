@@ -284,6 +284,7 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
     rgb_sensor.sensor_type = habitat_sim.SensorType.COLOR
     rgb_sensor.resolution = [cam_height, cam_width]
     rgb_sensor.position = [0.0, 0.0, 0.0] # Relative to agent's position
+    rgb_sensor.hfov = args.camera_hfov
     sensor_specs.append(rgb_sensor)
 
     semantic_camera_spec = habitat_sim.bindings.CameraSensorSpec()
@@ -291,6 +292,7 @@ def motion_rotate_dynamic_omega(args: argparse.Namespace) -> None:
     semantic_camera_spec.sensor_type = habitat_sim.SensorType.SEMANTIC
     semantic_camera_spec.resolution = [cam_height, cam_width]
     semantic_camera_spec.position = [0.0, 0.0, 0.0]
+    semantic_camera_spec.hfov = args.camera_hfov
     sensor_specs.append(semantic_camera_spec)
 
     # Agent configuration
@@ -475,6 +477,13 @@ if __name__ == "__main__":
         default=-1.0,
         metavar=("TIME"),
         help="Time at which to stop recording"
+    )
+    parser.add_argument(
+        "--camera_hfov",
+        type=float,
+        default=90.0,
+        metavar=("HFOV"),
+        help="Horizontal field of view for the RGB camera in degrees"
     )
     args = parser.parse_args()
 
