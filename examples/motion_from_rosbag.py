@@ -117,20 +117,46 @@ def read_rosbag_trajectory(
         source_rotations = Rotation.from_quat(source_quaternions)
         sampled_rotations = Slerp(sample_times, source_rotations)(frame_times)
 
-    target_quaternion = np.asarray(init_quat, dtype=float)
-    target_quaternion_norm = np.linalg.norm(target_quaternion)
-    if target_quaternion_norm < 1e-8:
-        raise ValueError("init_quat must be a non-zero quaternion in [x, y, z, w] order")
-    target_rotation = Rotation.from_quat(target_quaternion / target_quaternion_norm)
-    initial_alignment = target_rotation * sampled_rotations[0].inv()
-    target_position = np.asarray(init_pos, dtype=float)
-    path_positions = target_position + initial_alignment.apply(
-        path_positions - path_positions[0]
+    # DAVIS Optical Frame <-> Habitat Camera Frame
+    R_optical_habitat = Rotation.from_matrix(
+        np.diag([1.0, -1.0, -1.0])
     )
-    sampled_rotations = initial_alignment * sampled_rotations
-    frame_quaternions = sampled_rotations.as_quat(canonical=False)
+
+    # Convert camera local coordinate system
+    sampled_rotations = (
+        sampled_rotations * R_optical_habitat
+    )
+
+    # Desired initial pose in Habitat-Sim
+    target_rotation = Rotation.from_quat(
+        np.asarray(init_quat, dtype=float)
+    )
+    target_position = np.asarray(init_pos, dtype=float)
+
+    # Calculate global alignment
+    initial_alignment = (
+        target_rotation * sampled_rotations[0].inv()
+    )
+
+    # Transform positions
+    path_positions = (
+        target_position
+        + initial_alignment.apply(
+            path_positions - path_positions[0]
+        )
+    )
+
+    # Transform orientations
+    sampled_rotations = (
+        initial_alignment * sampled_rotations
+    )
+
+    # Convert to Habitat quaternion format
+    frame_quaternions = sampled_rotations.as_quat()
+
     path_rotations = [
-        np.quaternion(q[3], q[0], q[1], q[2]) for q in frame_quaternions
+        np.quaternion(q[3], q[0], q[1], q[2])
+        for q in frame_quaternions
     ]
     frame_times -= bag_start_time_ns * 1e-9  # Make the first timestamp zero
 
